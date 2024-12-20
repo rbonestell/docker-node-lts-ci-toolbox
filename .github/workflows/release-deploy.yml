@@ -1,0 +1,41 @@
+name: Release Deploy
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    # Get version and git hash
+    - name: Set version and hash
+      id: vars
+      run: |
+        # Remove 'v' prefix from tag and store version
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        
+        # Get short SHA
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_OUTPUT
+        
+    - name: Build and push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          rbonestell/node-lts-ci-toolbox:latest
+          rbonestell/node-lts-ci-toolbox:${{ steps.vars.outputs.VERSION }}
+          rbonestell/node-lts-ci-toolbox:${{ steps.vars.outputs.SHORT_SHA }}
+          rbonestell/node-lts-ci-toolbox:${{ steps.vars.outputs.VERSION }}-${{ steps.vars.outputs.SHORT_SHA }}
