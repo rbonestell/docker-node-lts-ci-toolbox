@@ -1,6 +1,6 @@
 ARG ARCH=amd64
 
-FROM --platform=$ARCH node:lts
+FROM --platform=$ARCH node:lts@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584
 
 LABEL description="Node LTS Docker image with common CI tools installed"
 LABEL website="https://github.com/rbonestell/docker-node-lts-ci-toolbox"
@@ -25,7 +25,7 @@ RUN ./aws/install
 RUN rm -rf aws
 
 # Install common tools globally with NPM
-RUN npm install -g random-generator-cli pick-random-cli 
+RUN npm install -g pick-random-cli
 
 # Clean NPM cache to avoid CI pipelines persisting global cache from this image
 RUN npm cache clean --force

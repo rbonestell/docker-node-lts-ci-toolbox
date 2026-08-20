@@ -3,32 +3,55 @@ name: Release Deploy
 on:
   release:
     types: [published]
+  # Allows the automated Dependabot release to publish the image directly,
+  # since releases created with GITHUB_TOKEN do not trigger the release event.
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to build and publish, without the leading 'v'"
+        required: true
+        type: string
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    
+
     steps:
+    # Get version from the workflow input or the release tag
+    - name: Set version
+      id: version
+      run: |
+        VERSION="${{ inputs.version }}"
+        if [ -z "$VERSION" ]; then
+          # Remove 'v' prefix from tag and store version
+          VERSION="${GITHUB_REF#refs/tags/v}"
+        fi
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
     - uses: actions/checkout@v4
-      
+      with:
+        ref: refs/tags/v${{ steps.version.outputs.VERSION }}
+
     - name: Login to Docker Hub
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    # Get version and git hash
-    - name: Set version and hash
+    # Get git hash
+    - name: Set hash
       id: vars
       run: |
-        # Remove 'v' prefix from tag and store version
-        VERSION=${GITHUB_REF#refs/tags/v}
-        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-        
         # Get short SHA
         SHORT_SHA=$(git rev-parse --short HEAD)
         echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_OUTPUT
-        
+        echo "VERSION=${{ steps.version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+
     - name: Build and push
       uses: docker/build-push-action@v5
       with:

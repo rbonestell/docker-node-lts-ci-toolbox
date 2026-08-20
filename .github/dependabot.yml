@@ -1,0 +1,14 @@
+version: 2
+
+updates:
+  # Track the node:lts base image so a new Node LTS image release opens a PR
+  # bumping the pinned digest in the Dockerfile.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "chore(docker)"
+    labels:
+      - "dependencies"
+    open-pull-requests-limit: 1
