@@ -25,7 +25,7 @@ RUN ./aws/install
 RUN rm -rf aws
 
 # Install common tools globally with NPM
-RUN npm install -g random-generator-cli pick-random-cli 
+RUN npm install -g nanoid pick-random-cli
 
 # Clean NPM cache to avoid CI pipelines persisting global cache from this image
 RUN npm cache clean --force

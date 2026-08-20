@@ -9,10 +9,15 @@ This image extends the official `node:lts` base image and adds several convenien
 - gettext-base
 - google-chrome-stable
 - jq
+- nanoid
 - pick-random-cli
 - procps
-- random-generator-cli
 - xvfb
+
+> [!NOTE]
+> `random-generator-cli` was unpublished from npm in May 2025 and has been replaced by
+> [`nanoid`](https://www.npmjs.com/package/nanoid), which provides a `nanoid` CLI for
+> generating random URL-friendly strings.
 
 > [!IMPORTANT]  
 > The `google-chrome-stable` package is not available for ARM architectures, so the default `ARCH` argument value is set to `amd64`.
