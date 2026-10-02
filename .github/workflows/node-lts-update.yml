@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      version: ${{ steps.release.outputs.VERSION }}
+      notes: ${{ steps.release.outputs.NOTES }}
 
     steps:
     - uses: actions/checkout@v4
@@ -53,7 +53,7 @@ jobs:
           [ "$(npm -v | cut -d. -f1)" -ge 12 ]
           jq --version && aws --version && google-chrome --version && which pick-random'
 
-    - name: Commit and create release
+    - name: Commit and merge
       id: release
       if: steps.digest.outputs.CURRENT != steps.digest.outputs.LATEST
       env:
@@ -85,38 +85,18 @@ jobs:
           -f status=completed -f conclusion=success >/dev/null
 
         # ponytail: a failure after this merge isn't retried by the next run (digests
-        # match by then); use "Re-run failed jobs", or publish the release manually
+        # match by then); use "Re-run failed jobs", or run Release Deploy manually
         gh pr merge "$PR_URL" --squash --delete-branch
-        MERGE_SHA=$(gh pr view "$PR_URL" --json mergeCommit --jq .mergeCommit.oid)
-
-        # Increment the revision number of the most recent release
-        PREVIOUS=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo v0.0.0)
-        if ! [[ "$PREVIOUS" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-          echo "Unable to parse latest release tag '$PREVIOUS' as a semantic version" >&2
-          exit 1
-        fi
-        VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$(( BASH_REMATCH[3] + 1 ))"
 
         NODE_VERSION=$(docker run --rm node-lts-ci-toolbox -c 'node -v')
         NPM_VERSION=$(docker run --rm node-lts-ci-toolbox -c 'npm -v')
+        echo "NOTES=Automated release for a Node LTS base image update: \`node:lts@$LATEST\` (Node.js $NODE_VERSION, npm $NPM_VERSION)" >> "$GITHUB_OUTPUT"
 
-        gh release create "v$VERSION" \
-          --target "$MERGE_SHA" \
-          --title "v$VERSION" \
-          --notes "$(printf '%s\n' \
-            "Automated release for a Node LTS base image update." \
-            "" \
-            "- Base image: \`node:lts@$LATEST\`" \
-            "- Node.js $NODE_VERSION, npm $NPM_VERSION")"
-
-        echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-
-  # Called directly because releases created with GITHUB_TOKEN do not trigger
-  # the release event
+  # Release Deploy picks the next vYYYY.MM.DD.I version and creates the release
   deploy:
     needs: update
-    if: needs.update.outputs.version != ''
+    if: needs.update.outputs.notes != ''
     uses: ./.github/workflows/release-deploy.yml
     with:
-      version: ${{ needs.update.outputs.version }}
+      notes: ${{ needs.update.outputs.notes }}
     secrets: inherit

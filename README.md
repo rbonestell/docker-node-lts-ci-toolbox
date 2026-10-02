@@ -36,18 +36,32 @@ It runs daily and can also be started manually with `workflow_dispatch`:
 3. Commits the bump to a branch, opens a PR, reports the build above as the required
    `build-and-test` check, and squash merges it. PRs opened with `GITHUB_TOKEN` don't trigger
    PR Validation, which is why the workflow reports the check itself.
-4. Creates a release whose version is the previous release with its revision number
-   incremented (for example `v1.0.0` becomes `v1.0.1`).
-5. Calls **Release Deploy** to build and push the new image tags to Docker Hub. It is called
-   directly because releases created with `GITHUB_TOKEN` do not trigger the `release` event.
+4. Calls **Release Deploy**, which creates the release with the next version and builds and
+   pushes the image to Docker Hub. It is called directly because releases created with
+   `GITHUB_TOKEN` do not trigger the `release` event.
 
 Because it tracks `node:lts`, the image moves to a new Node major version automatically when
 that version becomes LTS.
 
-Manual releases are unaffected: publish a release tagged `vX.Y.Z` and Release Deploy builds
-and pushes the image with that version.
+## Versioning
 
-### Repository requirements
+Releases use calendar versions in the form `vYYYY.MM.DD.I` (UTC date), where `I` is the
+release number for that day, starting at `1`. For example, the first release on 2 October
+2026 is `v2026.10.02.1` and a second one that day is `v2026.10.02.2`. Git tags and GitHub
+releases have the `v` prefix; Docker image tags don't (`2026.10.02.1`).
+
+Each image is pushed to Docker Hub as `latest`, `<version>`, `<short sha>` and
+`<version>-<short sha>`.
+
+### Manual releases
+
+- **Run workflow** on **Release Deploy** (recommended): creates the next version's release from
+  `main` with generated notes, then builds and pushes it.
+- **Publish a release** on GitHub: Release Deploy builds and pushes it. If the release's tag
+  isn't the next `vYYYY.MM.DD.I` version, that version's tag is also added to the same commit,
+  and the image is tagged with it.
+
+## Repository requirements
 
 - **Allow GitHub Actions to create and approve pull requests** must be enabled
   (Settings → Actions → General → Workflow permissions).
