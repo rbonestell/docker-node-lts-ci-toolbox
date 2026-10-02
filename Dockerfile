@@ -24,6 +24,9 @@ RUN rm -rf awscliv2.zip
 RUN ./aws/install
 RUN rm -rf aws
 
+# Upgrade npm to v12+ (node:lts bundles npm 11)
+RUN npm install -g npm@12
+
 # Install common tools globally with NPM
 RUN npm install -g pick-random-cli
 

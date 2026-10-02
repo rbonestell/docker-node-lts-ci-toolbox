@@ -3,7 +3,7 @@ name: Release Deploy
 on:
   release:
     types: [published]
-  # Allows the automated Dependabot release to publish the image directly,
+  # Allows the automated Node LTS update to publish the image directly,
   # since releases created with GITHUB_TOKEN do not trigger the release event.
   workflow_call:
     inputs:
