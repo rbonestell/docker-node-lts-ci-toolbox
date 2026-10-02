@@ -4,7 +4,8 @@ A low maintenance Docker image based upon Node.js LTS, intended for CI/CD pipeli
 
 ## Overview
 
-This image extends the official `node:lts` base image and adds several convenient tools commonly used in CI pipelines:
+This image extends the official `node:lts` base image (currently Node.js 24) with npm upgraded
+to v12, and adds several convenient tools commonly used in CI pipelines:
 
 - gettext-base
 - google-chrome-stable
@@ -23,28 +24,47 @@ This image extends the official `node:lts` base image and adds several convenien
 
 ## Automated base image updates
 
-The `node:lts` base image is pinned by digest in the `Dockerfile`, and the update of that
-pin is fully automated:
+The `node:lts` base image is pinned by digest in the `Dockerfile`. The **Node LTS Update**
+workflow (`.github/workflows/node-lts-update.yml`) keeps that pin current with no manual steps.
+It runs daily and can also be started manually with `workflow_dispatch`:
 
-1. **Dependabot** (`.github/dependabot.yml`) checks the `node:lts` tag daily and opens a PR
-   bumping the pinned digest whenever a new Node LTS image is published.
-2. **PR Validation** builds the image on that PR.
-3. **Dependabot Auto Merge** enables auto-merge on the PR, so it squash merges as soon as
-   validation passes.
-4. **Dependabot Auto Release** creates a new release once the merged PR touched the
-   `Dockerfile`. The version is the previous release with its revision number incremented
-   (for example `v1.0.0` becomes `v1.0.1`).
-5. **Release Deploy** builds and pushes the new image tags to Docker Hub. It is called
-   directly by the auto release workflow, because releases created with `GITHUB_TOKEN` do
-   not trigger the `release` event; manually published releases still run it as before.
+1. Compares the currently published `node:lts` digest to the one pinned in the `Dockerfile`,
+   and stops if they match.
+2. Updates the pin, builds the image and smoke tests it (Node, npm 12+, jq, AWS CLI, Chrome,
+   pick-random-cli). Nothing is committed if this fails, so the next run retries. A failure
+   after the merge in step 3 is not retried automatically; re-run the failed jobs.
+3. Commits the bump to a branch, opens a PR, reports the build above as the required
+   `build-and-test` check, and squash merges it. PRs opened with `GITHUB_TOKEN` don't trigger
+   PR Validation, which is why the workflow reports the check itself.
+4. Calls **Release Deploy**, which creates the release with the next version and builds and
+   pushes the image to Docker Hub. It is called directly because releases created with
+   `GITHUB_TOKEN` do not trigger the `release` event.
 
-Manual releases are unaffected: publish a release tagged `vX.Y.Z` and the image is built
-and pushed with that version.
+Because it tracks `node:lts`, the image moves to a new Node major version automatically when
+that version becomes LTS.
 
-### Repository requirements
+## Versioning
 
-- Allow auto-merge must be enabled in the repository settings for step 3.
-- Allow GitHub Actions to create and approve pull requests / branch protection should permit
-  the `GITHUB_TOKEN` to merge; required status checks on `main` gate the auto-merge.
-- The `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets must be available to Dependabot's
-  merged changes via the normal Actions secrets (they are only used after merge, on `main`).
+Releases use calendar versions in the form `vYYYY.MM.DD.I` (UTC date), where `I` is the
+release number for that day, starting at `1`. For example, the first release on 2 October
+2026 is `v2026.10.02.1` and a second one that day is `v2026.10.02.2`. Git tags and GitHub
+releases have the `v` prefix; Docker image tags don't (`2026.10.02.1`).
+
+Each image is pushed to Docker Hub as `latest`, `<version>`, `<short sha>` and
+`<version>-<short sha>`.
+
+### Manual releases
+
+- **Run workflow** on **Release Deploy** (recommended): creates the next version's release from
+  `main` with generated notes, then builds and pushes it.
+- **Publish a release** on GitHub: Release Deploy builds and pushes it. If the release's tag
+  isn't the next `vYYYY.MM.DD.I` version, that version's tag is also added to the same commit,
+  and the image is tagged with it.
+
+## Repository requirements
+
+- **Allow GitHub Actions to create and approve pull requests** must be enabled
+  (Settings → Actions → General → Workflow permissions).
+- The `main` ruleset may require PRs and the `build-and-test` check, but must not require
+  approving reviews, since the workflow merges its own PR.
+- The `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` Actions secrets must be set.

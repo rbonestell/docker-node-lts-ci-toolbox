@@ -1,0 +1,102 @@
+name: Node LTS Update
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    outputs:
+      notes: ${{ steps.release.outputs.NOTES }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: main
+        fetch-depth: 0
+
+    # Compare the published node:lts digest to the one pinned in the Dockerfile
+    - name: Check node:lts digest
+      id: digest
+      run: |
+        set -euo pipefail
+        CURRENT=$(grep -m1 -o 'node:lts@sha256:[0-9a-f]*' Dockerfile | cut -d@ -f2)
+        LATEST=$(docker buildx imagetools inspect node:lts --format '{{json .Manifest}}' | jq -r .digest)
+        echo "Pinned: $CURRENT, published: $LATEST"
+        echo "CURRENT=$CURRENT" >> "$GITHUB_OUTPUT"
+        echo "LATEST=$LATEST" >> "$GITHUB_OUTPUT"
+
+    - name: Update Dockerfile
+      if: steps.digest.outputs.CURRENT != steps.digest.outputs.LATEST
+      env:
+        CURRENT: ${{ steps.digest.outputs.CURRENT }}
+        LATEST: ${{ steps.digest.outputs.LATEST }}
+      run: sed -i "s/node:lts@$CURRENT/node:lts@$LATEST/" Dockerfile
+
+    # Build and smoke test before anything is committed or published
+    - name: Build and test image
+      if: steps.digest.outputs.CURRENT != steps.digest.outputs.LATEST
+      run: |
+        set -euo pipefail
+        docker build -t node-lts-ci-toolbox .
+        docker run --rm node-lts-ci-toolbox -c '
+          set -e
+          node -v && npm -v
+          [ "$(npm -v | cut -d. -f1)" -ge 12 ]
+          jq --version && aws --version && google-chrome --version && which pick-random'
+
+    - name: Commit and merge
+      id: release
+      if: steps.digest.outputs.CURRENT != steps.digest.outputs.LATEST
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        LATEST: ${{ steps.digest.outputs.LATEST }}
+      run: |
+        set -euo pipefail
+
+        TITLE="chore(docker): bump node:lts to ${LATEST:7:12}"
+        BRANCH="node-lts/${LATEST:7:12}"
+
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git checkout -b "$BRANCH"
+        git commit -am "$TITLE"
+        git push -f origin "$BRANCH"
+
+        # main requires a PR; reuse the PR left by a previous failed run if there is one
+        PR_URL=$(gh pr view "$BRANCH" --json url,state --jq 'select(.state == "OPEN") | .url' 2>/dev/null || true)
+        if [ -z "$PR_URL" ]; then
+          PR_URL=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" \
+            --body "Automated Node LTS base image update. Built and smoke tested by the Node LTS Update workflow.")
+        fi
+
+        # PRs opened with GITHUB_TOKEN don't trigger PR Validation, so report the
+        # build and smoke test above as the required build-and-test check
+        gh api "repos/$GITHUB_REPOSITORY/check-runs" \
+          -f name=build-and-test -f head_sha="$(git rev-parse HEAD)" \
+          -f status=completed -f conclusion=success >/dev/null
+
+        # ponytail: a failure after this merge isn't retried by the next run (digests
+        # match by then); use "Re-run failed jobs", or run Release Deploy manually
+        gh pr merge "$PR_URL" --squash --delete-branch
+
+        NODE_VERSION=$(docker run --rm node-lts-ci-toolbox -c 'node -v')
+        NPM_VERSION=$(docker run --rm node-lts-ci-toolbox -c 'npm -v')
+        echo "NOTES=Automated release for a Node LTS base image update: \`node:lts@$LATEST\` (Node.js $NODE_VERSION, npm $NPM_VERSION)" >> "$GITHUB_OUTPUT"
+
+  # Release Deploy picks the next vYYYY.MM.DD.I version and creates the release
+  deploy:
+    needs: update
+    if: needs.update.outputs.notes != ''
+    uses: ./.github/workflows/release-deploy.yml
+    with:
+      notes: ${{ needs.update.outputs.notes }}
+    secrets: inherit

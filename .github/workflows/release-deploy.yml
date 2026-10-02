@@ -1,15 +1,18 @@
 name: Release Deploy
 
 on:
+  # A manually published release; it also gets a vYYYY.MM.DD.I tag if its own tag isn't one
   release:
     types: [published]
-  # Allows the automated Dependabot release to publish the image directly,
-  # since releases created with GITHUB_TOKEN do not trigger the release event.
+  # Creates the next vYYYY.MM.DD.I release from main, then builds and pushes it
+  workflow_dispatch:
+  # Used by the automated Node LTS update, since releases created with GITHUB_TOKEN
+  # do not trigger the release event
   workflow_call:
     inputs:
-      version:
-        description: "Version to build and publish, without the leading 'v'"
-        required: true
+      notes:
+        description: "Release notes; generated from commits when empty"
+        required: false
         type: string
     secrets:
       DOCKERHUB_USERNAME:
@@ -17,25 +20,59 @@ on:
       DOCKERHUB_TOKEN:
         required: true
 
+permissions:
+  contents: write
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
 
-    steps:
-    # Get version from the workflow input or the release tag
-    - name: Set version
-      id: version
-      run: |
-        VERSION="${{ inputs.version }}"
-        if [ -z "$VERSION" ]; then
-          # Remove 'v' prefix from tag and store version
-          VERSION="${GITHUB_REF#refs/tags/v}"
-        fi
-        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+    # Two releases on the same day must not claim the same iteration
+    concurrency:
+      group: release-version
 
+    steps:
     - uses: actions/checkout@v4
       with:
-        ref: refs/tags/v${{ steps.version.outputs.VERSION }}
+        ref: ${{ github.event_name == 'release' && github.ref || 'main' }}
+        fetch-depth: 0
+
+    # Version is vYYYY.MM.DD.I (UTC), where I counts releases made that day, starting at 1
+    - name: Set version
+      id: version
+      env:
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+      run: |
+        set -euo pipefail
+        TODAY=$(date -u +%Y.%m.%d)
+        # The published release's own tag already exists, so leave it out of the count
+        LAST=$(git tag -l "v$TODAY.*" | grep -vxF "${RELEASE_TAG:-}" | sed "s/^v$TODAY\.//" | grep -xE '[0-9]+' | sort -n | tail -1 || true)
+        VERSION="$TODAY.$(( ${LAST:-0} + 1 ))"
+        echo "Version: v$VERSION"
+        echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+
+    - name: Tag published release
+      if: github.event_name == 'release' && github.event.release.tag_name != format('v{0}', steps.version.outputs.VERSION)
+      env:
+        VERSION: ${{ steps.version.outputs.VERSION }}
+      run: |
+        git tag "v$VERSION"
+        git push origin "v$VERSION"
+
+    - name: Create release
+      if: github.event_name != 'release'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        VERSION: ${{ steps.version.outputs.VERSION }}
+        NOTES: ${{ inputs.notes }}
+      run: |
+        set -euo pipefail
+        if [ -n "${NOTES:-}" ]; then
+          NOTES_ARGS=(--notes "$NOTES")
+        else
+          NOTES_ARGS=(--generate-notes)
+        fi
+        gh release create "v$VERSION" --target "$(git rev-parse HEAD)" --title "v$VERSION" "${NOTES_ARGS[@]}"
 
     - name: Login to Docker Hub
       uses: docker/login-action@v3
@@ -43,14 +80,9 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    # Get git hash
     - name: Set hash
       id: vars
-      run: |
-        # Get short SHA
-        SHORT_SHA=$(git rev-parse --short HEAD)
-        echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_OUTPUT
-        echo "VERSION=${{ steps.version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+      run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
     - name: Build and push
       uses: docker/build-push-action@v5
@@ -59,6 +91,6 @@ jobs:
         push: true
         tags: |
           rbonestell/node-lts-ci-toolbox:latest
-          rbonestell/node-lts-ci-toolbox:${{ steps.vars.outputs.VERSION }}
+          rbonestell/node-lts-ci-toolbox:${{ steps.version.outputs.VERSION }}
           rbonestell/node-lts-ci-toolbox:${{ steps.vars.outputs.SHORT_SHA }}
-          rbonestell/node-lts-ci-toolbox:${{ steps.vars.outputs.VERSION }}-${{ steps.vars.outputs.SHORT_SHA }}
+          rbonestell/node-lts-ci-toolbox:${{ steps.version.outputs.VERSION }}-${{ steps.vars.outputs.SHORT_SHA }}
