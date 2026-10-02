@@ -14,6 +14,10 @@ on:
         description: "Release notes; generated from commits when empty"
         required: false
         type: string
+      ref:
+        description: "Commit to release; main when empty"
+        required: false
+        type: string
     secrets:
       DOCKERHUB_USERNAME:
         required: true
@@ -34,7 +38,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        ref: ${{ github.event_name == 'release' && github.ref || 'main' }}
+        ref: ${{ inputs.ref || (github.event_name == 'release' && github.ref || 'main') }}
         fetch-depth: 0
 
     # Version is vYYYY.MM.DD.I (UTC), where I counts releases made that day, starting at 1
@@ -47,10 +51,34 @@ jobs:
         TODAY=$(date -u +%Y.%m.%d)
         # The published release's own tag already exists, so leave it out of the count
         LAST=$(git tag -l "v$TODAY.*" | grep -vxF "${RELEASE_TAG:-}" | sed "s/^v$TODAY\.//" | grep -xE '[0-9]+' | sort -n | tail -1 || true)
-        VERSION="$TODAY.$(( ${LAST:-0} + 1 ))"
+        # 10# so a zero-padded iteration like 08 isn't read as octal
+        VERSION="$TODAY.$(( 10#${LAST:-0} + 1 ))"
         echo "Version: v$VERSION"
         echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
 
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Set hash
+      id: vars
+      run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+    - name: Build and push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          rbonestell/node-lts-ci-toolbox:latest
+          rbonestell/node-lts-ci-toolbox:${{ steps.version.outputs.VERSION }}
+          rbonestell/node-lts-ci-toolbox:${{ steps.vars.outputs.SHORT_SHA }}
+          rbonestell/node-lts-ci-toolbox:${{ steps.version.outputs.VERSION }}-${{ steps.vars.outputs.SHORT_SHA }}
+
+    # Only after the image is pushed, so a failed push leaves no tag and a re-run
+    # gets the same version
     - name: Tag published release
       if: github.event_name == 'release' && github.event.release.tag_name != format('v{0}', steps.version.outputs.VERSION)
       env:
@@ -73,24 +101,3 @@ jobs:
           NOTES_ARGS=(--generate-notes)
         fi
         gh release create "v$VERSION" --target "$(git rev-parse HEAD)" --title "v$VERSION" "${NOTES_ARGS[@]}"
-
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Set hash
-      id: vars
-      run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-    - name: Build and push
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: true
-        tags: |
-          rbonestell/node-lts-ci-toolbox:latest
-          rbonestell/node-lts-ci-toolbox:${{ steps.version.outputs.VERSION }}
-          rbonestell/node-lts-ci-toolbox:${{ steps.vars.outputs.SHORT_SHA }}
-          rbonestell/node-lts-ci-toolbox:${{ steps.version.outputs.VERSION }}-${{ steps.vars.outputs.SHORT_SHA }}

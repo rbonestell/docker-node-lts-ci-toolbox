@@ -31,14 +31,14 @@ It runs daily and can also be started manually with `workflow_dispatch`:
 1. Compares the currently published `node:lts` digest to the one pinned in the `Dockerfile`,
    and stops if they match.
 2. Updates the pin, builds the image and smoke tests it (Node, npm 12+, jq, AWS CLI, Chrome,
-   pick-random-cli). Nothing is committed if this fails, so the next run retries. A failure
-   after the merge in step 3 is not retried automatically; re-run the failed jobs.
+   pick-random-cli). Nothing is merged if this fails, so the next run retries. A failure
+   after the merge in step 3 is not retried automatically; run Release Deploy manually.
 3. Commits the bump to a branch, opens a PR, reports the build above as the required
    `build-and-test` check, and squash merges it. PRs opened with `GITHUB_TOKEN` don't trigger
    PR Validation, which is why the workflow reports the check itself.
-4. Calls **Release Deploy**, which creates the release with the next version and builds and
-   pushes the image to Docker Hub. It is called directly because releases created with
-   `GITHUB_TOKEN` do not trigger the `release` event.
+4. Calls **Release Deploy** for the merge commit, which builds and pushes the image to Docker
+   Hub and then creates the release with the next version. It is called directly because
+   releases created with `GITHUB_TOKEN` do not trigger the `release` event.
 
 Because it tracks `node:lts`, the image moves to a new Node major version automatically when
 that version becomes LTS.

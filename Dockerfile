@@ -5,11 +5,11 @@ FROM --platform=$ARCH node:lts@sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec
 LABEL description="Node LTS Docker image with common CI tools installed"
 LABEL website="https://github.com/rbonestell/docker-node-lts-ci-toolbox"
 
-# Download Google's Linux signing public key and add to apt
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+# Download Google's Linux signing public key into an apt keyring (apt-key is gone in Debian 13)
+RUN install -d -m 0755 /etc/apt/keyrings && wget -qO- https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google.gpg
 
 # Add Google Chrome for Debian to apt sources
-RUN echo "deb http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google.list
+RUN echo "deb [signed-by=/etc/apt/keyrings/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google.list
 
 # Update apt packages
 RUN apt-get update -qqy
@@ -24,8 +24,8 @@ RUN rm -rf awscliv2.zip
 RUN ./aws/install
 RUN rm -rf aws
 
-# Upgrade npm to v12+ (node:lts bundles npm 11)
-RUN npm install -g npm@12
+# Upgrade npm to v12 if the bundled npm is older (node:lts Node 24 bundles npm 11)
+RUN [ "$(npm -v | cut -d. -f1)" -ge 12 ] || npm install -g npm@12
 
 # Install common tools globally with NPM
 RUN npm install -g pick-random-cli

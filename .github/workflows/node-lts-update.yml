@@ -5,6 +5,11 @@ on:
     - cron: "0 8 * * *"
   workflow_dispatch:
 
+# A manual run overlapping the scheduled one would race on the same branch, PR and release
+concurrency:
+  group: node-lts-update
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
@@ -16,12 +21,20 @@ jobs:
 
     outputs:
       notes: ${{ steps.release.outputs.NOTES }}
+      merge_sha: ${{ steps.release.outputs.MERGE_SHA }}
 
     steps:
     - uses: actions/checkout@v4
       with:
         ref: main
         fetch-depth: 0
+
+    # Authenticated pulls avoid Docker Hub's anonymous rate limit on shared runners
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
 
     # Compare the published node:lts digest to the one pinned in the Dockerfile
     - name: Check node:lts digest
@@ -72,7 +85,7 @@ jobs:
         git push -f origin "$BRANCH"
 
         # main requires a PR; reuse the PR left by a previous failed run if there is one
-        PR_URL=$(gh pr view "$BRANCH" --json url,state --jq 'select(.state == "OPEN") | .url' 2>/dev/null || true)
+        PR_URL=$(gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // empty')
         if [ -z "$PR_URL" ]; then
           PR_URL=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" \
             --body "Automated Node LTS base image update. Built and smoke tested by the Node LTS Update workflow.")
@@ -84,19 +97,39 @@ jobs:
           -f name=build-and-test -f head_sha="$(git rev-parse HEAD)" \
           -f status=completed -f conclusion=success >/dev/null
 
-        # ponytail: a failure after this merge isn't retried by the next run (digests
-        # match by then); use "Re-run failed jobs", or run Release Deploy manually
-        gh pr merge "$PR_URL" --squash --delete-branch
-
+        # Everything that can fail runs before the merge, so a failure leaves main
+        # untouched and the next run retries
         NODE_VERSION=$(docker run --rm node-lts-ci-toolbox -c 'node -v')
         NPM_VERSION=$(docker run --rm node-lts-ci-toolbox -c 'npm -v')
         echo "NOTES=Automated release for a Node LTS base image update: \`node:lts@$LATEST\` (Node.js $NODE_VERSION, npm $NPM_VERSION)" >> "$GITHUB_OUTPUT"
 
+        # Mergeability and ruleset checks can lag behind the check run just posted
+        for ATTEMPT in 1 2 3 4 5 6; do
+          if gh pr merge "$PR_URL" --squash --delete-branch; then
+            break
+          fi
+          # Merged, but deleting the branch failed
+          if [ "$(gh pr view "$PR_URL" --json state --jq .state)" = "MERGED" ]; then
+            break
+          fi
+          if [ "$ATTEMPT" -eq 6 ]; then
+            echo "Unable to merge $PR_URL" >&2
+            exit 1
+          fi
+          sleep 10
+        done
+
+        # ponytail: a failure from here on isn't retried by the next run (digests
+        # match by then); run Release Deploy manually instead
+        MERGE_SHA=$(gh pr view "$PR_URL" --json mergeCommit --jq .mergeCommit.oid)
+        echo "MERGE_SHA=$MERGE_SHA" >> "$GITHUB_OUTPUT"
+
   # Release Deploy picks the next vYYYY.MM.DD.I version and creates the release
   deploy:
     needs: update
-    if: needs.update.outputs.notes != ''
+    if: needs.update.outputs.notes != '' && needs.update.outputs.merge_sha != ''
     uses: ./.github/workflows/release-deploy.yml
     with:
       notes: ${{ needs.update.outputs.notes }}
+      ref: ${{ needs.update.outputs.merge_sha }}
     secrets: inherit
