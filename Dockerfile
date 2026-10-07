@@ -1,6 +1,6 @@
 ARG ARCH=amd64
 
-FROM --platform=$ARCH node:lts@sha256:22f6fe5f59fb7fed238b19623506d573dffaa932ce33b84ce541a9a2e0eade28
+FROM --platform=$ARCH node:lts@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb3714d5eb3300a36157add0
 
 LABEL description="Node LTS Docker image with common CI tools installed"
 LABEL website="https://github.com/rbonestell/docker-node-lts-ci-toolbox"
