@@ -6,10 +6,10 @@ LABEL description="Node LTS Docker image with common CI tools installed"
 LABEL website="https://github.com/rbonestell/docker-node-lts-ci-toolbox"
 
 # Download Google's Linux signing public key and add to apt
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+RUN wget -q -O /usr/share/keyrings/google-linux.asc https://dl-ssl.google.com/linux/linux_signing_key.pub
 
 # Add Google Chrome for Debian to apt sources
-RUN echo "deb http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google.list
+RUN echo "deb [signed-by=/usr/share/keyrings/google-linux.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google.list
 
 # Update apt packages
 RUN apt-get update -qqy
